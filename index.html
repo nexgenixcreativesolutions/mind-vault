@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+l<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
@@ -611,7 +611,7 @@ const WORD_BANK = [
 //  STATE
 // ════════════════════════════════════════════════════════════
 let progress    = JSON.parse(localStorage.getItem('mv_progress') || '{}');
-let unlocked    = JSON.parse(localStorage.getItem('mv_unlocked') || '["memory"]');
+let unlocked    = JSON.parse(localStorage.getItem('mv_unlocked') || '["memory","pattern","wordwarp","mathblitz"]');
 let scores      = JSON.parse(localStorage.getItem('mv_scores')   || '{}');
 
 let currentWorld   = null;
@@ -629,6 +629,11 @@ let pendingUnlock  = null;
 //  INIT
 // ════════════════════════════════════════════════════════════
 function init() {
+  // Migration: if old save only had 'memory', reset to include all 4 base worlds
+  if (JSON.stringify(unlocked) === '["memory"]') {
+    unlocked = ['memory','pattern','wordwarp','mathblitz'];
+    saveProgress();
+  }
   setupAds();
   renderWorlds();
   updateHomeStats();
@@ -660,7 +665,20 @@ function renderWorlds() {
   const list = document.getElementById('worldsList');
   list.innerHTML = '';
   WORLDS.forEach(w => {
-    const isUnlocked = unlocked.includes(w.id);
+    // Non-bonus worlds: auto-unlock if previous world is complete
+    let isUnlocked = unlocked.includes(w.id);
+    if (!isUnlocked && !w.bonus) {
+      const nonBonus = WORLDS.filter(x => !x.bonus);
+      const myIdx = nonBonus.indexOf(w);
+      if (myIdx === 0) { isUnlocked = true; }
+      else {
+        const prev = nonBonus[myIdx - 1];
+        if ((progress[prev.id] || 0) >= prev.levels) {
+          isUnlocked = true;
+          if (!unlocked.includes(w.id)) unlocked.push(w.id);
+        }
+      }
+    }
     const wProgress  = progress[w.id] || 0;
     const pct        = Math.round((wProgress / w.levels) * 100);
 
@@ -679,7 +697,12 @@ function renderWorlds() {
       ${!isUnlocked ? `<div class="world-lock">${w.bonus ? '🎬' : '🔒'}</div>` : ''}
       ${isUnlocked && w.bonus ? '<div class="world-badge">BONUS</div>' : ''}
     `;
-    card.onclick = () => isUnlocked ? openWorld(w) : tryUnlockWorld(w);
+    // Non-bonus locked worlds: tap shows "complete previous world" message
+    card.onclick = () => {
+      if (isUnlocked) { openWorld(w); }
+      else if (w.bonus) { tryUnlockWorld(w); }
+      else { showToast('Complete the previous world to unlock! 🔒', 'bad'); }
+    };
     list.appendChild(card);
   });
 }
@@ -794,10 +817,50 @@ function buildPuzzle(type, levelIdx) {
   const area = document.getElementById('puzzleArea');
   area.innerHTML = '';
 
-  if (type === 'memory')  buildMemoryPuzzle(area, levelIdx);
+  if      (type === 'memory')  buildMemoryPuzzle(area, levelIdx);
   else if (type === 'pattern') buildPatternPuzzle(area, levelIdx);
   else if (type === 'word')    buildWordPuzzle(area, levelIdx);
   else if (type === 'math')    buildMathPuzzle(area, levelIdx);
+  else if (type === 'zen')     buildZenPuzzle(area, levelIdx);
+  else if (type === 'mixed')   buildMixedPuzzle(area, levelIdx);
+}
+
+// ── ZEN: Logic grid — no timer, pure deduction ──────────────
+function buildZenPuzzle(area, levelIdx) {
+  // Zen uses rotating puzzle types but with no time pressure
+  const zenTypes = ['memory','word','math','pattern'];
+  const zenType  = zenTypes[levelIdx % zenTypes.length];
+
+  // Add a zen mode banner
+  const banner = el('div','instructions',
+    '🧘 <strong>Zen Mode</strong> — No timer. Take your time and think clearly.');
+  banner.style.marginBottom = '8px';
+  area.appendChild(banner);
+
+  if      (zenType === 'memory')  buildMemoryPuzzle(area, levelIdx);
+  else if (zenType === 'word')    buildWordPuzzle(area, levelIdx);
+  else if (zenType === 'math')    buildMathPuzzle(area, levelIdx);
+  else if (zenType === 'pattern') buildPatternPuzzle(area, levelIdx);
+}
+
+// ── MIXED (Chaos): Rotates through all 4 types fast ────────
+function buildMixedPuzzle(area, levelIdx) {
+  const chaosTypes = ['memory','pattern','word','math'];
+  const chosenType = chaosTypes[levelIdx % chaosTypes.length];
+
+  // Chaos banner showing which type is active
+  const typeLabels = {
+    memory:'🧮 Memory', pattern:'⚡ Pattern', word:'🔤 Word', math:'🔢 Math'
+  };
+  const banner = el('div','instructions',
+    `🌀 <strong>Chaos Mode</strong> — ${typeLabels[chosenType]} challenge! Fast!`);
+  banner.style.marginBottom = '8px';
+  area.appendChild(banner);
+
+  if      (chosenType === 'memory')  buildMemoryPuzzle(area, levelIdx);
+  else if (chosenType === 'pattern') buildPatternPuzzle(area, levelIdx);
+  else if (chosenType === 'word')    buildWordPuzzle(area, levelIdx);
+  else if (chosenType === 'math')    buildMathPuzzle(area, levelIdx);
 }
 
 // ── MEMORY: Show sequence, hide it, recall ──────────────────
